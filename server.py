@@ -35,15 +35,15 @@ os.makedirs(PROCESSED_FOLDER, exist_ok=True)
 
 # Memory optimization function
 def optimize_memory():
-    """Force garbage collection to free memory"""
-    gc.collect()
-    if hasattr(gc, 'set_threshold'):
-        gc.set_threshold(700, 10, 10)
+  """Force garbage collection to free memory"""
+  gc.collect()
+  if hasattr(gc, 'set_threshold'):
+    gc.set_threshold(700, 10, 10)
 
 def get_memory_usage():
-    """Get current memory usage in MB"""
-    process = psutil.Process(os.getpid())
-    return process.memory_info().rss / 1024 / 1024
+  """Get current memory usage in MB"""
+  process = psutil.Process(os.getpid())
+  return process.memory_info().rss / 1024 / 1024
 
 
 
