@@ -1013,8 +1013,8 @@ def handle_video_upload():
         print(f"[ERROR] Upload failed: {e}")
         traceback.print_exc()
         print(f"[MEMORY] Usage before error: {get_memory_usage():.1f}MB")
-         optimize_memory()
-         print(f"[MEMORY] Usage after error: {get_memory_usage():.1f}MB")
+        optimize_memory()
+        print(f"[MEMORY] Usage after error: {get_memory_usage():.1f}MB")
         return jsonify({
             "error": str(e),
             "success": False,
