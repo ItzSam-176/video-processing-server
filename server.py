@@ -1121,12 +1121,12 @@ def handle_500(e):
 
 if __name__ == '__main__':
     # Railway-specific configuration
-    # port = int(os.environ.get('PORT', 5000))
+    port = int(os.environ.get('PORT', 5000))
     print(f"[SERVER] Starting on Railway - Port: {port}")
     print("[SERVER] Production mode - Railway deployment")
     
     # Don't pre-load heavy models on Railway
-    app.run(host='0.0.0.0', port=5000, debug=False, threaded=True)
+    app.run(host='0.0.0.0', port=port, debug=False, threaded=True)
 
 else:
     # Production server (Render will use this)
