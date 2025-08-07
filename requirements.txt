@@ -8,3 +8,4 @@ pillow==9.5.0
 pilmoji==2.0.1
 whisper==1.1.10
 gunicorn==21.2.0
+psutil==5.9.0
