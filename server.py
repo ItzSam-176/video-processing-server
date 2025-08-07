@@ -34,13 +34,19 @@ PROCESSED_FOLDER = 'processed'
 os.makedirs(PROCESSED_FOLDER, exist_ok=True)
 
 #Subtitles
-def load_whisper_model(model_size="base"):
-    """Load Whisper model once for reuse"""
+def load_whisper_model(model_size="tiny"):  # Use "tiny" for Railway
+    """Load Whisper model with Railway optimization"""
     global WHISPER_MODEL
     if WHISPER_MODEL is None:
-        print(f"[WHISPER] Loading {model_size} model...")
-        WHISPER_MODEL = whisper.load_model(model_size)
-        print("[WHISPER] Model loaded successfully")
+        print(f"[WHISPER] Loading {model_size} model for Railway...")
+        try:
+            WHISPER_MODEL = whisper.load_model(model_size)
+            print("[WHISPER] Model loaded successfully")
+        except Exception as e:
+            print(f"[WHISPER] Model loading failed: {e}")
+            # Fallback to even smaller model
+            WHISPER_MODEL = whisper.load_model("base")
+            print("[WHISPER] Fallback model loaded")
     return WHISPER_MODEL
 
 def generate_subtitles_with_whisper_trimmed(video_path, language="auto", translate_to_english=False, trim_start=0, trim_end=None):
