@@ -1113,11 +1113,6 @@ def ping():
 def handle_500(e):
     return jsonify({"error": "Internal server error", "status": "error"}), 500
 
-@app.before_first_request
-def startup():
-    print("[STARTUP] Flask app initialized successfully")
-
-
 if __name__ == '__main__':
     # Railway-specific configuration
     port = int(os.environ.get('PORT', 5000))
