@@ -33,20 +33,6 @@ CORS(app)
 PROCESSED_FOLDER = 'processed'
 os.makedirs(PROCESSED_FOLDER, exist_ok=True)
 
-# Memory optimization function
-def optimize_memory():
-  """Force garbage collection to free memory"""
-  gc.collect()
-  if hasattr(gc, 'set_threshold'):
-    gc.set_threshold(700, 10, 10)
-
-def get_memory_usage():
-  """Get current memory usage in MB"""
-  process = psutil.Process(os.getpid())
-  return process.memory_info().rss / 1024 / 1024
-
-
-
 #Subtitles
 def load_whisper_model(model_size="base"):
     """Load Whisper model once for reuse"""
@@ -1000,9 +986,6 @@ def handle_video_upload():
         print(f"[UPLOAD] Returning video URL: {video_url}")
 
         # Optimize memory usage after processing
-        print(f"[MEMORY] Usage before processing: {get_memory_usage():.1f}MB")
-        optimize_memory()
-        print(f"[MEMORY] Usage after processing: {get_memory_usage():.1f}MB")
         return jsonify({
             "processed_video_uri": video_url,
             "success": True,
@@ -1012,9 +995,6 @@ def handle_video_upload():
     except Exception as e:
         print(f"[ERROR] Upload failed: {e}")
         traceback.print_exc()
-        print(f"[MEMORY] Usage before error: {get_memory_usage():.1f}MB")
-        optimize_memory()
-        print(f"[MEMORY] Usage after error: {get_memory_usage():.1f}MB")
         return jsonify({
             "error": str(e),
             "success": False,
