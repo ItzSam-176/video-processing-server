@@ -81,7 +81,7 @@ def generate_subtitles_with_whisper_trimmed(video_path, language="auto", transla
         print(f"[WHISPER] Trimmed duration: {trim_end - trim_start}s")
         
         # ✅ STEP 2: Generate subtitles from trimmed video (timing will be 0-based)
-        model = load_whisper_model("small")
+        model = load_whisper_model("tiny")
         
         # Extract audio from trimmed video
         audio_path = extract_audio_for_whisper(temp_trimmed_video.name)
