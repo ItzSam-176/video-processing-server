@@ -1092,23 +1092,41 @@ def generate_subtitles():
             except Exception as e:
                 print(f"[CLEANUP] Temp file cleanup failed: {e}")
 
+# Add this to fix Railway health checks
+@app.route('/')
+def root():
+    return jsonify({
+        "status": "healthy",
+        "service": "video-processing-server",
+        "message": "Server is running"
+    }), 200
+
+@app.route('/health')
+def health_check():
+    return "OK", 200
+
+@app.route('/ping')
+def ping():
+    return "pong", 200
+
+@app.errorhandler(500)
+def handle_500(e):
+    return jsonify({"error": "Internal server error", "status": "error"}), 500
+
+@app.before_first_request
+def startup():
+    print("[STARTUP] Flask app initialized successfully")
+
 
 if __name__ == '__main__':
-    print("="*50)
-    print("[SERVER] Video Processing Server with Aspect-Ratio Aware Text")
-    print("[SERVER] Features:")
-    print("[SERVER] - Video trimming and audio overlay")
-    print("[SERVER] - Aspect-ratio aware font scaling")
-    print("[SERVER] - Full-color emoji text rendering (Pilmoji)")
-    print("[SERVER] - HTTP video serving")
-    print("[SERVER] - Automatic temp file cleanup")
-    print("[SERVER] - Cross-platform compatibility")
-    print("="*50)
-    print("[SERVER] Flask server starting on port 5000...")
-    print("="*50)
+    # Railway-specific configuration
+    port = int(os.environ.get('PORT', 5000))
+    print(f"[SERVER] Starting on Railway - Port: {port}")
+    print("[SERVER] Production mode - Railway deployment")
     
-    # app.run(host='0.0.0.0', port=5000, debug=True)
-    app.run(host='0.0.0.0', port=int(os.environ.get('PORT', 5000)), debug=False)
+    # Don't pre-load heavy models on Railway
+    app.run(host='0.0.0.0', port=port, debug=False, threaded=True)
+
 else:
     # Production server (Render will use this)
     print("[SERVER] Production mode - using Gunicorn")
