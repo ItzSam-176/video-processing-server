@@ -1021,7 +1021,7 @@ def handle_video_upload():
         processed_path = process_video_file(temp_video.name, output_path, request.form, audio_path)
         
         # Return network-accessible URL
-        video_url = f"http://{request.host}/processed-videos/{output_filename}"
+        video_url = f"http://{request.host}/python-app/processed/{output_filename}"
         print(f"[UPLOAD] Returning video URL: {video_url}")
 
         # Optimize memory usage after processing
