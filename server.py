@@ -37,6 +37,13 @@ os.makedirs(PROCESSED_FOLDER, exist_ok=True)
 def load_whisper_model(model_size="tiny"):  # Use "tiny" for Railway
     """Load Whisper model with Railway optimization"""
     global WHISPER_MODEL
+
+    if WHISPER_MODEL is not None:
+        print("[WHISPER] Cleaning up existing model...")
+        del WHISPER_MODEL
+        WHISPER_MODEL = None
+        gc.collect()  # Force garbage collection
+
     if WHISPER_MODEL is None:
         print(f"[WHISPER] Loading {model_size} model for Railway...")
         try:
@@ -91,7 +98,7 @@ def generate_subtitles_with_whisper_trimmed(video_path, language="auto", transla
         print(f"[WHISPER] Trimmed duration: {trim_end - trim_start}s")
         
         # ✅ STEP 2: Generate subtitles from trimmed video (timing will be 0-based)
-        model = load_whisper_model("tiny")
+        model = load_whisper_model("small")
         
         # Extract audio from trimmed video
         audio_path = extract_audio_for_whisper(temp_trimmed_video.name)
