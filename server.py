@@ -54,7 +54,7 @@ def load_whisper_model(model_size="tiny"):  # Use "tiny" for Railway
         except Exception as e:
             print(f"[WHISPER] Model loading failed: {e}")
             # Fallback to even smaller model
-            WHISPER_MODEL = whisper.load_model("base")
+            WHISPER_MODEL = whisper.load_model("small")
             print("[WHISPER] Fallback model loaded")
     return WHISPER_MODEL
 
