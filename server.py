@@ -12,6 +12,8 @@ import textwrap
 from PIL import Image, ImageDraw, ImageFont, ImageColor
 from pilmoji import Pilmoji
 
+import time
+
 #Memory Optimization
 import gc
 import psutil
@@ -273,7 +275,7 @@ def extract_audio_for_whisper(video_path):
     try:
         print(f"[WHISPER] Starting audio extraction from: {video_path}")
         
-        # ✅ File existence and size validation
+        # File existence and size validation
         if not os.path.exists(video_path):
             raise FileNotFoundError(f"Video file not found: {video_path}")
         
@@ -283,29 +285,28 @@ def extract_audio_for_whisper(video_path):
         
         print(f"[WHISPER] Video file validated - Size: {file_size / (1024*1024):.2f} MB")
         
-        # ✅ Load video with enhanced error handling
         try:
             video = VideoFileClip(video_path)
         except Exception as moviepy_error:
             raise ValueError(f"MoviePy failed to load video: {moviepy_error}")
         
-        # ✅ Validate video object
         if video is None:
             raise ValueError("MoviePy returned None - video file may be corrupted or unsupported format")
         
-        # ✅ Check video properties
         if not hasattr(video, 'duration') or video.duration <= 0:
             raise ValueError(f"Invalid video duration: {getattr(video, 'duration', 'None')}")
         
-        # ✅ Verify audio track exists - ENHANCED ERROR MESSAGE
         if video.audio is None:
             video.close()
             raise ValueError("Video file has no audio track - cannot generate subtitles. This video appears to be silent or recorded without audio.")
         
         print(f"[WHISPER] Video validated - Duration: {video.duration:.2f}s, Size: {video.size}")
         
-        # ✅ Extract audio with enhanced settings
-        audio_path = tempfile.NamedTemporaryFile(suffix='.wav', delete=False).name
+        # ✅ FIXED: Use system temp directory for audio extraction
+        temp_dir = tempfile.gettempdir()
+        unique_id = f"{os.getpid()}-{int(time.time())}"
+        audio_path = os.path.join(temp_dir, f"whisper-audio-{unique_id}.wav")
+        
         print(f"[WHISPER] Extracting audio to: {audio_path}")
         
         # Enhanced audio extraction for better speech recognition
@@ -313,20 +314,21 @@ def extract_audio_for_whisper(video_path):
             audio_path, 
             verbose=False, 
             logger=None,
-            # ✅ Audio enhancement settings
             codec='pcm_s16le',  # Uncompressed for better quality
-            # ffmpeg_params=['-ac', '1']  # Convert to mono for better recognition
         )
         
-        # ✅ Optional: Apply audio filtering to enhance vocals
+        # Optional: Apply audio filtering to enhance vocals
         enhanced_audio_path = enhance_audio_for_speech(audio_path)
         
         # Clean up original if enhanced version was created
         if enhanced_audio_path != audio_path:
-            os.unlink(audio_path)
+            try:
+                os.unlink(audio_path)
+            except:
+                pass
             audio_path = enhanced_audio_path
         
-        # ✅ Validate extracted audio file
+        # Validate extracted audio file
         if not os.path.exists(audio_path) or os.path.getsize(audio_path) == 0:
             raise ValueError("Audio extraction failed - output file is empty")
         
@@ -351,7 +353,11 @@ def enhance_audio_for_speech(audio_path):
     """Enhance audio to improve speech recognition in music"""
     try:
         import subprocess
-        enhanced_path = tempfile.NamedTemporaryFile(suffix='.wav', delete=False).name
+        
+        # ✅ FIXED: Use system temp directory
+        temp_dir = tempfile.gettempdir()
+        unique_id = f"{os.getpid()}-{int(time.time())}"
+        enhanced_path = os.path.join(temp_dir, f"enhanced-audio-{unique_id}.wav")
         
         # Use FFmpeg to enhance vocals and reduce background music
         subprocess.run([
@@ -369,7 +375,6 @@ def enhance_audio_for_speech(audio_path):
     except Exception as e:
         print(f"[WHISPER] Audio enhancement failed: {e}, using original")
         return audio_path
-
 
 
 def create_subtitle_clip(subtitles, video_width, video_height, font_size=None, font_color='white', bg_color='black'):
@@ -783,7 +788,7 @@ def process_video_file(input_path, output_path, params, audio_path=None):
                 print(f"[PROCESSING] Audio start time ({audio_start_time}s) exceeds audio duration ({audio_clip.duration}s)")
                 clip = clip.set_audio(None)
 
-        #here
+        # Text overlay processing (your existing code)
         if params.get('text'):
             print("[PROCESSING] Adding text overlay with IMPROVED aspect-ratio sizing...")
             
@@ -806,9 +811,9 @@ def process_video_file(input_path, output_path, params, audio_path=None):
             center_y = int(float(params.get('pos_y', video_h // 2))) - 11
             
             print(f"[PROCESSING] Video: {video_w}x{video_h} (AR: {aspect_ratio:.2f})")
-            print(f"[PROCESSING] Recommended method: {recommended_method}")
             print(f"[PROCESSING] Font scaling: {user_font_size}px → {final_font_size}px")
             print(f"[PROCESSING] Text position: ({center_x}, {center_y})")
+            
             # Pre-calculate text dimensions
             temp_img = Image.new('RGBA', (100, 100), (0, 0, 0, 0))
             temp_draw = ImageDraw.Draw(temp_img)
@@ -847,9 +852,7 @@ def process_video_file(input_path, output_path, params, audio_path=None):
         else:
             video = clip
 
-
-        
-        # Handle subtitle overlay - FIXED VERSION
+        # Handle subtitle overlay (your existing code)
         if params.get('enable_subtitles') == 'true':
             print("[PROCESSING] Adding auto-generated subtitles...")
             
@@ -857,27 +860,22 @@ def process_video_file(input_path, output_path, params, audio_path=None):
             subtitle_color = params.get('subtitle_color', 'white')
             subtitle_bg_color = params.get('subtitle_bg_color', 'black')
             
-            # ✅ FIX: Use the SAME trim parameters that were used for video trimming
-            # These are the ALREADY CALCULATED values from earlier in the function
             print(f"[PROCESSING] Using trim parameters for subtitles: {start_time}s to {end_time}s")
             print(f"[PROCESSING] Subtitle generation duration: {end_time - start_time}s")
             
-            # FIX: Pass language parameters correctly
             subtitle_language = params.get('subtitle_language', 'auto')
             translate_to_english = params.get('translate_to_english', 'false').lower() == 'true'
             
-            # ✅ Generate subtitles with CORRECT trim parameters
             subtitle_result = generate_subtitles_with_whisper_trimmed(
                 input_path,
                 language=subtitle_language,
                 translate_to_english=translate_to_english,
-                trim_start=start_time,  # ✅ Use already calculated start_time
-                trim_end=end_time       # ✅ Use already calculated end_time
+                trim_start=start_time,
+                trim_end=end_time
             )
             
             print(f"[DEBUG] Generated trimmed subtitles: {subtitle_result}")
             
-            # Create subtitle clip (timing is now 0-based for trimmed video)
             subtitle_clip = create_subtitle_clip(
                 subtitle_result['subtitles'],
                 video_w, video_h,
@@ -886,33 +884,61 @@ def process_video_file(input_path, output_path, params, audio_path=None):
                 bg_color=subtitle_bg_color
             )
             
-            # Composite with existing video
             if isinstance(video, CompositeVideoClip):
                 video = CompositeVideoClip([video, subtitle_clip.set_duration(video.duration)])
             else:
                 video = CompositeVideoClip([video, subtitle_clip.set_duration(video.duration)])
             
             print(f"[PROCESSING] Added {len(subtitle_result['subtitles'])} subtitle segments for trimmed video")
- 
-        
-
 
         # Preserve original audio if no replacement audio
         if not video.audio and clip.audio:
             video = video.set_audio(clip.audio)
 
+        # ✅ FIXED: Use system temp directory for all temp files
         print(f"[PROCESSING] Writing output to: {output_path}")
-        video.write_videofile(
-            output_path, 
-            codec="libx264", 
-            audio_codec="aac",
-            temp_audiofile="temp-audio.m4a",
-            remove_temp=True,
-            verbose=False,
-            logger=None
-        )
         
-        print("[SUCCESS] Processing complete.")
+        # Create unique temp file names using system temp directory
+        temp_dir = tempfile.gettempdir()
+        unique_id = f"{os.getpid()}-{int(time.time())}"
+        temp_audio_path = os.path.join(temp_dir, f"temp-audio-{unique_id}.m4a")
+        
+        print(f"[PROCESSING] Using temp audio file: {temp_audio_path}")
+        
+        try:
+            video.write_videofile(
+                output_path, 
+                codec="libx264", 
+                audio_codec="aac",
+                temp_audiofile=temp_audio_path,  # ✅ Use system temp directory
+                remove_temp=True,
+                verbose=False,
+                logger=None,
+                threads=4,  # Use multiple threads for faster processing
+                preset='medium'  # Good balance of speed vs quality
+            )
+            
+            print("[SUCCESS] Processing complete.")
+            
+        except Exception as write_error:
+            print(f"[ERROR] Video writing failed: {write_error}")
+            # Manual cleanup of temp file if write_videofile fails
+            if os.path.exists(temp_audio_path):
+                try:
+                    os.remove(temp_audio_path)
+                    print(f"[CLEANUP] Manually removed temp audio file: {temp_audio_path}")
+                except:
+                    pass
+            raise write_error
+        finally:
+            # Extra safety cleanup - ensure temp audio file is removed
+            if os.path.exists(temp_audio_path):
+                try:
+                    os.remove(temp_audio_path)
+                    print(f"[CLEANUP] Final cleanup of temp audio file: {temp_audio_path}")
+                except:
+                    pass
+        
         return output_path
         
     except Exception as e:
