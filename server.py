@@ -6,9 +6,8 @@ import tempfile
 import numpy as np
 from flask import Flask, request, jsonify, send_from_directory
 from flask_cors import CORS
-from werkzeug.utils import secure_filename
 from moviepy.editor import VideoFileClip, CompositeVideoClip, ImageClip, AudioFileClip
-import textwrap
+
 from PIL import Image, ImageDraw, ImageFont, ImageColor
 from pilmoji import Pilmoji
 
@@ -16,7 +15,6 @@ import time
 
 #Memory Optimization
 import gc
-import psutil
 
 #Filter
 import colorsys
@@ -24,7 +22,6 @@ from scipy import ndimage
 
 #Subtitles
 import whisper
-import json
 from moviepy.video.tools.subtitles import SubtitlesClip
 WHISPER_MODEL = None
 
@@ -109,6 +106,18 @@ def generate_subtitles_with_whisper_trimmed(video_path, language="auto", transla
         task = 'translate' if translate_to_english else 'transcribe'
         
         # Transcribe trimmed audio (timing starts from 0)
+        # result = model.transcribe(
+        #     audio_path, 
+        #     task=task,
+        #     language=None if language == "auto" else language,
+        #     verbose=False,
+        #     word_timestamps=True,
+        #     temperature=0,
+        #     no_speech_threshold=0.3,
+        #     logprob_threshold=-0.8,
+        #     condition_on_previous_text=False,
+        # )
+        # ✅ Enhanced transcription with better detection
         result = model.transcribe(
             audio_path, 
             task=task,
@@ -116,11 +125,12 @@ def generate_subtitles_with_whisper_trimmed(video_path, language="auto", transla
             verbose=False,
             word_timestamps=True,
             temperature=0,
-            no_speech_threshold=0.3,
-            logprob_threshold=-0.8,
+            no_speech_threshold=0.1,     # ✅ Lower threshold for better detection
+            logprob_threshold=-1.5,      # ✅ Lower threshold for more lenient detection
             condition_on_previous_text=False,
-            initial_prompt="This is a song with lyrics and music."
+            compression_ratio_threshold=2.4
         )
+
         
         print(f"[WHISPER] Detected language: {result.get('language', 'unknown')}")
         print(f"[WHISPER] Found {len(result['segments'])} raw segments")
@@ -177,58 +187,6 @@ def generate_subtitles_with_whisper_trimmed(video_path, language="auto", transla
                 print("[WHISPER] Cleaned up extracted audio file")
             except Exception as cleanup_error:
                 print(f"[WHISPER] Audio cleanup warning: {cleanup_error}")
-
-def fill_timeline_gaps(segments, audio_duration, gap_threshold=2.0):
-    """
-    Fill gaps in timeline where Whisper didn't detect speech
-    """
-    if not segments:
-        return segments
-    
-    filled_segments = []
-    previous_end = 0
-    
-    for segment in segments:
-        current_start = segment['start']
-        
-        # If there's a significant gap, add a silence marker
-        if current_start - previous_end > gap_threshold:
-            gap_segment = {
-                'start': previous_end,
-                'end': current_start,
-                'text': '[Music]'  # Optional: mark as music/silence
-            }
-            # Only add if you want to show music indicators
-            # filled_segments.append(gap_segment)
-        
-        filled_segments.append(segment)
-        previous_end = segment['end']
-    
-    # Handle gap at the end
-    if audio_duration - previous_end > gap_threshold:
-        final_segment = {
-            'start': previous_end,
-            'end': audio_duration,
-            'text': '[Music]'
-        }
-        # filled_segments.append(final_segment)
-    
-    return filled_segments
-
-def get_audio_duration(audio_path):
-    """Get duration of audio file"""
-    try:
-        import librosa
-        y, sr = librosa.load(audio_path)
-        return len(y) / sr
-    except:
-        # Fallback using moviepy
-        from moviepy.editor import AudioFileClip
-        audio = AudioFileClip(audio_path)
-        duration = audio.duration
-        audio.close()
-        return duration
-
 
 def split_long_subtitle(text, start_time, end_time, max_chars, max_words):
     """
@@ -308,10 +266,8 @@ def extract_audio_for_whisper(video_path):
         
         unique_id = f"{os.getpid()}-{int(time.time())}"
         audio_path = os.path.join(temp_dir, f"whisper-audio-{unique_id}.wav")
-        temp_moviepy_audio = os.path.join(temp_dir, f"moviepy-temp-{unique_id}.m4a")
-        
+
         print(f"[WHISPER] Extracting audio to: {audio_path}")
-        print(f"[WHISPER] MoviePy temp file: {temp_moviepy_audio}")
         
         # ✅ AGGRESSIVE FIX: Change working directory to force MoviePy compliance
         original_cwd = os.getcwd()
@@ -324,7 +280,6 @@ def extract_audio_for_whisper(video_path):
                 verbose=False, 
                 logger=None,
                 codec='pcm_s16le',
-                temp_audiofile=temp_moviepy_audio
             )
         finally:
             os.chdir(original_cwd)  # Always restore working directory
@@ -455,11 +410,6 @@ def get_aspect_ratio_aware_font_size(user_size, video_width, video_height, metho
     
     return user_size
 
-def get_recommended_scaling_method(video_width, video_height):
-    """Always use proportional for better user experience"""
-    return 'proportional'
-
-
 def load_font_with_size(font_size):
     """Load font with fallback for different systems"""
     font = None
@@ -512,17 +462,6 @@ def create_text_with_emoji_pilmoji_fixed_macos(text, font_size=48, color='white'
     bbox = draw.textbbox((0, 0), text, font=font)
     text_w = bbox[2] - bbox[0]
     text_h = bbox[3] - bbox[1]
-
-    # ✅ Handle text wider than canvas
-    if text_w > size[0]:
-        print(f"[TEXT] Text too wide ({text_w}px > {size[0]}px), adjusting font size")
-        # Reduce font size to fit
-        adjusted_font_size = int(font_size * size[0] / text_w * 0.9)  # 90% of calculated size for margin
-        font = load_font_with_size(max(12, adjusted_font_size))  # Minimum 12px
-        bbox = draw.textbbox((0, 0), text, font=font)
-        text_w = bbox[2] - bbox[0]
-        text_h = bbox[3] - bbox[1]
-        print(f"[TEXT] Adjusted font size to {adjusted_font_size}px")
 
     # Use provided position or center if None
     if text_position is not None:
@@ -807,12 +746,8 @@ def process_video_file(input_path, output_path, params, audio_path=None):
             
             video_w, video_h = clip.size
             aspect_ratio = video_w / video_h
-            
-            # Use recommended scaling method
-            recommended_method = get_recommended_scaling_method(video_w, video_h)
-            final_font_size = get_aspect_ratio_aware_font_size(
-                user_font_size, video_w, video_h, recommended_method
-            )
+
+            final_font_size = user_font_size
             
             # Get position parameters
             center_x = int(float(params.get('pos_x', video_w // 2)))
@@ -1029,7 +964,8 @@ def handle_video_upload():
         processed_path = process_video_file(temp_video.name, output_path, request.form, audio_path)
         
         # Return network-accessible URL
-        video_url = f"http://{request.host}/python-app/processed/{output_filename}"
+        # video_url = f"http://{request.host}/python-app/processed/{output_filename}"
+        video_url = f"http://{request.host}/processed-videos/{output_filename}"
         print(f"[UPLOAD] Returning video URL: {video_url}")
 
         # Optimize memory usage after processing
@@ -1167,7 +1103,8 @@ if __name__ == '__main__':
     print("[SERVER] Production mode - Railway deployment")
     
     # Don't pre-load heavy models on Railway
-    app.run(host='0.0.0.0', port=port, debug=False, threaded=True)
+    # app.run(host='0.0.0.0', port=port, debug=False, threaded=True)
+    app.run(host='0.0.0.0', port=5000, debug=True)
 
 else:
     # Production server (Render will use this)
