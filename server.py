@@ -275,7 +275,7 @@ def extract_audio_for_whisper(video_path):
     try:
         print(f"[WHISPER] Starting audio extraction from: {video_path}")
         
-        # File existence and size validation
+        # File validation (keeping your existing code)
         if not os.path.exists(video_path):
             raise FileNotFoundError(f"Video file not found: {video_path}")
         
@@ -291,24 +291,19 @@ def extract_audio_for_whisper(video_path):
             raise ValueError(f"MoviePy failed to load video: {moviepy_error}")
         
         if video is None:
-            raise ValueError("MoviePy returned None - video file may be corrupted or unsupported format")
+            raise ValueError("MoviePy returned None - video file may be corrupted")
         
         if not hasattr(video, 'duration') or video.duration <= 0:
             raise ValueError(f"Invalid video duration: {getattr(video, 'duration', 'None')}")
         
         if video.audio is None:
             video.close()
-            raise ValueError("Video file has no audio track - cannot generate subtitles. This video appears to be silent or recorded without audio.")
+            raise ValueError("Video file has no audio track - cannot generate subtitles")
         
         print(f"[WHISPER] Video validated - Duration: {video.duration:.2f}s, Size: {video.size}")
         
-        # ✅ FIXED: Use os.path for temp directory (cross-platform)
-        if os.name == 'nt':  # Windows
-            temp_dir = os.path.join(os.environ.get('TEMP', 'C:\\Windows\\Temp'))
-        else:  # macOS/Linux
-            temp_dir = '/tmp'
-        
-        # Ensure temp directory exists
+        # ✅ FIXED: Use consistent temp directory approach (same as your working functions)
+        temp_dir = tempfile.gettempdir()
         os.makedirs(temp_dir, exist_ok=True)
         
         unique_id = f"{os.getpid()}-{int(time.time())}"
@@ -318,19 +313,26 @@ def extract_audio_for_whisper(video_path):
         print(f"[WHISPER] Extracting audio to: {audio_path}")
         print(f"[WHISPER] MoviePy temp file: {temp_moviepy_audio}")
         
-        # ✅ Enhanced audio extraction with explicit temp file path
-        video.audio.write_audiofile(
-            audio_path, 
-            verbose=False, 
-            logger=None,
-            codec='pcm_s16le',  # Uncompressed for better quality
-            temp_audiofile=temp_moviepy_audio  # ✅ CRITICAL FIX: Explicit temp path
-        )
+        # ✅ AGGRESSIVE FIX: Change working directory to force MoviePy compliance
+        original_cwd = os.getcwd()
+        try:
+            os.chdir(temp_dir)  # Force MoviePy to use temp directory
+            print(f"[WHISPER] Changed working directory to: {temp_dir}")
+            
+            video.audio.write_audiofile(
+                audio_path, 
+                verbose=False, 
+                logger=None,
+                codec='pcm_s16le',
+                temp_audiofile=temp_moviepy_audio
+            )
+        finally:
+            os.chdir(original_cwd)  # Always restore working directory
+            print(f"[WHISPER] Restored working directory to: {original_cwd}")
         
-        # Optional: Apply audio filtering to enhance vocals
+        # Rest of your function remains the same...
         enhanced_audio_path = enhance_audio_for_speech(audio_path)
         
-        # Clean up original if enhanced version was created
         if enhanced_audio_path != audio_path:
             try:
                 os.unlink(audio_path)
@@ -338,20 +340,16 @@ def extract_audio_for_whisper(video_path):
                 pass
             audio_path = enhanced_audio_path
         
-        # Validate extracted audio file
         if not os.path.exists(audio_path) or os.path.getsize(audio_path) == 0:
             raise ValueError("Audio extraction failed - output file is empty")
         
         print(f"[WHISPER] Audio extraction successful: {os.path.getsize(audio_path)} bytes")
         
-        # Clean up video object
         video.close()
-        
         return audio_path
         
     except Exception as e:
         print(f"[WHISPER] Audio extraction failed: {e}")
-        # Ensure video object is cleaned up on error
         if video is not None:
             try:
                 video.close()
