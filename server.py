@@ -54,7 +54,7 @@ def load_whisper_model(model_size="tiny"):  # Use "tiny" for Railway
         except Exception as e:
             print(f"[WHISPER] Model loading failed: {e}")
             # Fallback to even smaller model
-            WHISPER_MODEL = whisper.load_model("base")
+            WHISPER_MODEL = whisper.load_model("small")
             print("[WHISPER] Fallback model loaded")
     return WHISPER_MODEL
 
@@ -302,19 +302,29 @@ def extract_audio_for_whisper(video_path):
         
         print(f"[WHISPER] Video validated - Duration: {video.duration:.2f}s, Size: {video.size}")
         
-        # ✅ FIXED: Use system temp directory for audio extraction
-        temp_dir = tempfile.gettempdir()
+        # ✅ FIXED: Use os.path for temp directory (cross-platform)
+        if os.name == 'nt':  # Windows
+            temp_dir = os.path.join(os.environ.get('TEMP', 'C:\\Windows\\Temp'))
+        else:  # macOS/Linux
+            temp_dir = '/tmp'
+        
+        # Ensure temp directory exists
+        os.makedirs(temp_dir, exist_ok=True)
+        
         unique_id = f"{os.getpid()}-{int(time.time())}"
         audio_path = os.path.join(temp_dir, f"whisper-audio-{unique_id}.wav")
+        temp_moviepy_audio = os.path.join(temp_dir, f"moviepy-temp-{unique_id}.m4a")
         
         print(f"[WHISPER] Extracting audio to: {audio_path}")
+        print(f"[WHISPER] MoviePy temp file: {temp_moviepy_audio}")
         
-        # Enhanced audio extraction for better speech recognition
+        # ✅ Enhanced audio extraction with explicit temp file path
         video.audio.write_audiofile(
             audio_path, 
             verbose=False, 
             logger=None,
             codec='pcm_s16le',  # Uncompressed for better quality
+            temp_audiofile=temp_moviepy_audio  # ✅ CRITICAL FIX: Explicit temp path
         )
         
         # Optional: Apply audio filtering to enhance vocals
