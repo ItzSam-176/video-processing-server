@@ -21,7 +21,8 @@ import colorsys
 from scipy import ndimage
 
 #Subtitles
-import whisper
+# import whisper
+import openai_whisper as whisper
 from moviepy.video.tools.subtitles import SubtitlesClip
 WHISPER_MODEL = None
 
