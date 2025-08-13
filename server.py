@@ -59,7 +59,7 @@ def generate_subtitles_with_whisper_trimmed(video_path, language="auto", transla
     """
     Generate auto-subtitles for TRIMMED video portion with proper timing synchronization
     """
-    temp_trimmed_video = None
+    temp_video_path = None
     audio_path = None
     try:
         print(f"[WHISPER] Starting subtitle generation for trimmed portion: {trim_start}s to {trim_end}s")
