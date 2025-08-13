@@ -81,16 +81,32 @@ def generate_subtitles_with_whisper_trimmed(video_path, language="auto", transla
         trimmed_clip = original_clip.subclip(trim_start, trim_end)
 
         temp_dir = tempfile.gettempdir()
+        print(f"[GENERATE SUBTITLE TEMP DEBUG] System temp directory: {temp_dir}")
+        print(f"[GENERATE SUBTITLE TEMP DEBUG] Temp directory exists: {os.path.exists(temp_dir)}")
+        print(f"[GENERATE SUBTITLE TEMP DEBUG] Temp directory writable: {os.access(temp_dir, os.W_OK)}")
+        print(f"[GENERATE SUBTITLE TEMP DEBUG] Current working directory: {os.getcwd()}")
         unique_id = f"{os.getpid()}-{int(time.time())}"
         temp_video_path = os.path.join(temp_dir, f"whisper-trimmed-{unique_id}.mp4")
         temp_audio_file = os.path.join(temp_dir, f"whisper-temp-audio-{unique_id}.m4a")
+        print(f"[GENERATE SUBTITLE TEMP DEBUG] Generated unique ID: {unique_id}")
+        print(f"[GENERATE SUBTITLE TEMP DEBUG] Process ID: {os.getpid()}")
+        print(f"[GENERATE SUBTITLE TEMP DEBUG] Timestamp: {int(time.time())}")
+        print(f"[GENERATE SUBTITLE TEMP DEBUG] Temp video path: {temp_video_path}")
+        print(f"[GENERATE SUBTITLE TEMP DEBUG] Temp audio path: {temp_audio_file}")
+        print(f"[GENERATE SUBTITLE TEMP DEBUG] Temp video parent dir exists: {os.path.exists(os.path.dirname(temp_video_path))}")
+        print(f"[GENERATE SUBTITLE TEMP DEBUG] Temp audio parent dir exists: {os.path.exists(os.path.dirname(temp_audio_file))}")
         
         original_cwd = os.getcwd()
-        
+        print(f"[TEMP DEBUG] Original working directory: {original_cwd}")
         # Save trimmed video to temp file
         try:
             os.chdir(temp_dir)  # Force MoviePy to use temp directory
             print(f"[WHISPER] Changed working directory to: {temp_dir}")
+            print(f"[GENERATE SUBTITLE TEMP DEBUG] Changed working directory to: {temp_dir}")
+            print(f"[GENERATE SUBTITLE TEMP DEBUG] Current working directory after change: {os.getcwd()}")
+
+            print(f"[GENERATE SUBTITLE TEMP DEBUG] About to create trimmed video file...")
+            print(f"[GENERATE SUBTITLE TEMP DEBUG] MoviePy will create temp files in: {os.getcwd()}")
             
             trimmed_clip.write_videofile(
                 temp_video_path,
@@ -100,8 +116,30 @@ def generate_subtitles_with_whisper_trimmed(video_path, language="auto", transla
                 temp_audiofile=temp_audio_file,  # ✅ Specify temp audio location
                 remove_temp=True
             )
+
+            if os.path.exists(temp_video_path):
+                file_size = os.path.getsize(temp_video_path)
+                print(f"[GENERATE SUBTITLE TEMP DEBUG] ✅ Trimmed video created successfully")
+                print(f"[GENERATE SUBTITLE TEMP DEBUG] File size: {file_size / 1024 / 1024:.2f} MB")
+                print(f"[GENERATE SUBTITLE TEMP DEBUG] File permissions: {oct(os.stat(temp_video_path).st_mode)[-3:]}")
+            else:
+                print(f"[GENERATE SUBTITLE TEMP DEBUG] ❌ Trimmed video file NOT created!")
+                
+            if os.path.exists(temp_audio_file):
+                audio_size = os.path.getsize(temp_audio_file)
+                print(f"[GENERATE SUBTITLE TEMP DEBUG] ✅ Temp audio file created: {audio_size / 1024:.2f} KB")
+            else:
+                print(f"[GENERATE SUBTITLE TEMP DEBUG] ⚠️ Temp audio file not found (may be auto-removed)")
+                
+        except Exception as video_create_error:
+            print(f"[GENERATE SUBTITLE TEMP DEBUG] ❌ Error creating trimmed video: {video_create_error}")
+            print(f"[GENERATE SUBTITLE TEMP DEBUG] Error type: {type(video_create_error).__name__}")
+            raise video_create_error
+            
         finally:
             os.chdir(original_cwd)  # Always restore working directory
+            print(f"[GENERATE SUBTITLE TEMP DEBUG] Restored working directory to: {original_cwd}")
+            print(f"[GENERATE SUBTITLE TEMP DEBUG] Current working directory after restore: {os.getcwd()}")
             print(f"[WHISPER] Restored working directory to: {original_cwd}")
         
         
@@ -116,7 +154,9 @@ def generate_subtitles_with_whisper_trimmed(video_path, language="auto", transla
         model = load_whisper_model("small")
         
         # Extract audio from trimmed video
+        print(f"[GENERATE SUBTITLE TEMP DEBUG] About to extract audio from: {temp_video_path}")
         audio_path = extract_audio_for_whisper(temp_video_path)
+        print(f"[GENERATE SUBTITLE TEMP DEBUG] Audio extracted to: {audio_path}")
         
         # Define task
         task = 'translate' if translate_to_english else 'transcribe'
@@ -187,6 +227,9 @@ def generate_subtitles_with_whisper_trimmed(video_path, language="auto", transla
         
     except Exception as e:
         print(f"[WHISPER] Trimmed subtitle generation failed: {e}")
+        print(f"[GENERATE SUBTITLE TEMP DEBUG] ❌ Exception details: {type(e).__name__}: {str(e)}")
+        import traceback
+        traceback.print_exc()
         raise e
     finally:
         # Enhanced cleanup
@@ -278,18 +321,31 @@ def extract_audio_for_whisper(video_path):
         
         # ✅ FIXED: Use consistent temp directory approach (same as your working functions)
         temp_dir = tempfile.gettempdir()
+        print(f"[EXTRACT AUDIO TEMP DEBUG] Using temp directory: {temp_dir}")
         os.makedirs(temp_dir, exist_ok=True)
         
         unique_id = f"{os.getpid()}-{int(time.time())}"
         audio_path = os.path.join(temp_dir, f"whisper-audio-{unique_id}.wav")
 
+        print(f"[EXTRACT AUDIO TEMP DEBUG] Generated audio path: {audio_path}")
+        print(f"[EXTRACT AUDIO TEMP DEBUG] Audio parent directory: {os.path.dirname(audio_path)}")
+        print(f"[EXTRACT AUDIO TEMP DEBUG] Audio parent dir exists: {os.path.exists(os.path.dirname(audio_path))}")
+        print(f"[WHISPER] Extracting audio to: {audio_path}")
+
         print(f"[WHISPER] Extracting audio to: {audio_path}")
         
         # ✅ AGGRESSIVE FIX: Change working directory to force MoviePy compliance
         original_cwd = os.getcwd()
+        print(f"[EXTRACT AUDIO TEMP DEBUG] Original CWD: {original_cwd}")
         try:
             os.chdir(temp_dir)  # Force MoviePy to use temp directory
+            print(f"[EXTRACT AUDIO TEMP DEBUG] Changed CWD to: {temp_dir}")
+            print(f"[EXTRACT AUDIO TEMP DEBUG] Current CWD: {os.getcwd()}")
             print(f"[WHISPER] Changed working directory to: {temp_dir}")
+            
+            # ✅ Log before audio extraction
+            print(f"[EXTRACT AUDIO TEMP DEBUG] About to extract audio...")
+            print(f"[EXTRACT AUDIO TEMP DEBUG] MoviePy will create temp files in: {os.getcwd()}")
             
             video.audio.write_audiofile(
                 audio_path, 
@@ -297,8 +353,20 @@ def extract_audio_for_whisper(video_path):
                 logger=None,
                 codec='pcm_s16le',
             )
+            if os.path.exists(audio_path):
+                audio_size = os.path.getsize(audio_path)
+                print(f"[EXTRACT AUDIO TEMP DEBUG] ✅ Audio file created successfully")
+                print(f"[EXTRACT AUDIO TEMP DEBUG] Audio file size: {audio_size / 1024:.2f} KB")
+                print(f"[EXTRACT AUDIO TEMP DEBUG] Audio file permissions: {oct(os.stat(audio_path).st_mode)[-3:]}")
+            else:
+                print(f"[EXTRACT AUDIO TEMP DEBUG] ❌ Audio file NOT created!")
+        except Exception as audio_error:
+            print(f"[EXTRACT AUDIO TEMP DEBUG] ❌ Audio extraction error: {audio_error}")
+            print(f"[EXTRACT AUDIO TEMP DEBUG] Error type: {type(audio_error).__name__}")
+            raise audio_error
         finally:
             os.chdir(original_cwd)  # Always restore working directory
+            print(f"[EXTRACT AUDIO TEMP DEBUG] Restored CWD to: {original_cwd}")
             print(f"[WHISPER] Restored working directory to: {original_cwd}")
         
         # Rest of your function remains the same...
