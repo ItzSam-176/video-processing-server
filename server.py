@@ -60,6 +60,7 @@ def generate_subtitles_with_whisper_trimmed(video_path, language="auto", transla
     Generate auto-subtitles for TRIMMED video portion with proper timing synchronization
     """
     temp_video_path = None
+    temp_audio_file = None
     audio_path = None
     try:
         print(f"[WHISPER] Starting subtitle generation for trimmed portion: {trim_start}s to {trim_end}s")
@@ -87,7 +88,7 @@ def generate_subtitles_with_whisper_trimmed(video_path, language="auto", transla
         original_cwd = os.getcwd()
         
         # Save trimmed video to temp file
-       try:
+        try:
             os.chdir(temp_dir)  # Force MoviePy to use temp directory
             print(f"[WHISPER] Changed working directory to: {temp_dir}")
             
