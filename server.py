@@ -59,7 +59,7 @@ def generate_subtitles_with_whisper_trimmed(video_path, language="auto", transla
     """
     Generate auto-subtitles for TRIMMED video portion with proper timing synchronization
     """
-    temp_trimmed_video = None
+    temp_video_path = None
     audio_path = None
     try:
         print(f"[WHISPER] Starting subtitle generation for trimmed portion: {trim_start}s to {trim_end}s")
@@ -78,29 +78,44 @@ def generate_subtitles_with_whisper_trimmed(video_path, language="auto", transla
         
         # Create trimmed clip with correct end time
         trimmed_clip = original_clip.subclip(trim_start, trim_end)
+
+        temp_dir = tempfile.gettempdir()
+        unique_id = f"{os.getpid()}-{int(time.time())}"
+        temp_video_path = os.path.join(temp_dir, f"whisper-trimmed-{unique_id}.mp4")
+        temp_audio_file = os.path.join(temp_dir, f"whisper-temp-audio-{unique_id}.m4a")
+        
+        original_cwd = os.getcwd()
         
         # Save trimmed video to temp file
-        temp_trimmed_video = tempfile.NamedTemporaryFile(suffix='.mp4', delete=False)
-        trimmed_clip.write_videofile(
-            temp_trimmed_video.name,
-            verbose=False,
-            logger=None,
-            audio_codec='aac'
-        )
-        temp_trimmed_video.close()
+       try:
+            os.chdir(temp_dir)  # Force MoviePy to use temp directory
+            print(f"[WHISPER] Changed working directory to: {temp_dir}")
+            
+            trimmed_clip.write_videofile(
+                temp_video_path,
+                verbose=False,
+                logger=None,
+                audio_codec='aac',
+                temp_audiofile=temp_audio_file,  # ✅ Specify temp audio location
+                remove_temp=True
+            )
+        finally:
+            os.chdir(original_cwd)  # Always restore working directory
+            print(f"[WHISPER] Restored working directory to: {original_cwd}")
+        
         
         # Clean up clips
         trimmed_clip.close()
         original_clip.close()
         
-        print(f"[WHISPER] Created trimmed video: {temp_trimmed_video.name}")
+        print(f"[WHISPER] Created trimmed video: {temp_video_path}")
         print(f"[WHISPER] Trimmed duration: {trim_end - trim_start}s")
         
         # ✅ STEP 2: Generate subtitles from trimmed video (timing will be 0-based)
         model = load_whisper_model("small")
         
         # Extract audio from trimmed video
-        audio_path = extract_audio_for_whisper(temp_trimmed_video.name)
+        audio_path = extract_audio_for_whisper(temp_video_path)
         
         # Define task
         task = 'translate' if translate_to_english else 'transcribe'
@@ -173,20 +188,20 @@ def generate_subtitles_with_whisper_trimmed(video_path, language="auto", transla
         print(f"[WHISPER] Trimmed subtitle generation failed: {e}")
         raise e
     finally:
-        # Cleanup
-        if temp_trimmed_video and os.path.exists(temp_trimmed_video.name):
+        # Enhanced cleanup
+        if temp_video_path and os.path.exists(temp_video_path):
             try:
-                os.unlink(temp_trimmed_video.name)
+                os.unlink(temp_video_path)
                 print("[WHISPER] Cleaned up trimmed video file")
             except Exception as cleanup_error:
                 print(f"[WHISPER] Trimmed video cleanup warning: {cleanup_error}")
-                
-        if audio_path and os.path.exists(audio_path):
+        
+        if temp_audio_file and os.path.exists(temp_audio_file):
             try:
-                os.unlink(audio_path)
-                print("[WHISPER] Cleaned up extracted audio file")
+                os.unlink(temp_audio_file)
+                print("[WHISPER] Cleaned up temp audio file")
             except Exception as cleanup_error:
-                print(f"[WHISPER] Audio cleanup warning: {cleanup_error}")
+                print(f"[WHISPER] Temp audio cleanup warning: {cleanup_error}")
 
 def split_long_subtitle(text, start_time, end_time, max_chars, max_words):
     """
@@ -964,8 +979,7 @@ def handle_video_upload():
         processed_path = process_video_file(temp_video.name, output_path, request.form, audio_path)
         
         # Return network-accessible URL
-        # video_url = f"http://{request.host}/python-app/processed/{output_filename}"
-        video_url = f"http://{request.host}/processed-videos/{output_filename}"
+        video_url = f"http://{request.host}/python-app/processed/{output_filename}"
         print(f"[UPLOAD] Returning video URL: {video_url}")
 
         # Optimize memory usage after processing
