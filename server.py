@@ -80,8 +80,7 @@ def generate_subtitles_with_whisper_trimmed(video_path, language="auto", transla
         # Create trimmed clip with correct end time
         trimmed_clip = original_clip.subclip(trim_start, trim_end)
 
-        #temp_dir = tempfile.gettempdir();
-        temp_dir = '/var/www/pythonapp/tmp';
+        temp_dir = tempfile.gettempdir();
         print(f"[GENERATE SUBTITLE TEMP DEBUG] System temp directory: {temp_dir}")
         print(f"[GENERATE SUBTITLE TEMP DEBUG] Temp directory exists: {os.path.exists(temp_dir)}")
         print(f"[GENERATE SUBTITLE TEMP DEBUG] Temp directory writable: {os.access(temp_dir, os.W_OK)}")
@@ -321,8 +320,7 @@ def extract_audio_for_whisper(video_path):
         print(f"[WHISPER] Video validated - Duration: {video.duration:.2f}s, Size: {video.size}")
         
         # ✅ FIXED: Use consistent temp directory approach (same as your working functions)
-        #temp_dir = tempfile.gettempdir()
-        temp_dir = '/var/www/pythonapp/tmp';
+        temp_dir = tempfile.gettempdir()
         print(f"[EXTRACT AUDIO TEMP DEBUG] Using temp directory: {temp_dir}")
         os.makedirs(temp_dir, exist_ok=True)
         
@@ -404,9 +402,7 @@ def enhance_audio_for_speech(audio_path):
         import subprocess
         
         # ✅ FIXED: Use system temp directory
-        #temp_dir = tempfile.gettempdir()
-
-        temp_dir = '/var/www/pythonapp/tmp';
+        temp_dir = tempfile.gettempdir()
         unique_id = f"{os.getpid()}-{int(time.time())}"
         enhanced_path = os.path.join(temp_dir, f"enhanced-audio-{unique_id}.wav")
         
@@ -930,9 +926,7 @@ def process_video_file(input_path, output_path, params, audio_path=None):
         print(f"[PROCESSING] Writing output to: {output_path}")
         
         # Create unique temp file names using system temp directory
-        #temp_dir = tempfile.gettempdir()
-
-        temp_dir = '/var/www/pythonapp/tmp';
+        temp_dir = tempfile.gettempdir()
         unique_id = f"{os.getpid()}-{int(time.time())}"
         temp_audio_path = os.path.join(temp_dir, f"temp-audio-{unique_id}.m4a")
         
