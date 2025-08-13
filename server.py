@@ -1,8 +1,47 @@
-
 import os
+import tempfile
+import shutil
+
+def setup_custom_temp_directory():
+    """Set temp directory to server.py location instead of system root"""
+    
+    # Get the directory where server.py is located
+    server_dir = os.path.dirname(os.path.abspath(__file__))
+    custom_temp_dir = os.path.join(server_dir, 'tmp')
+    
+    # Create the temp directory if it doesn't exist
+    os.makedirs(custom_temp_dir, exist_ok=True)
+    
+    # Set permissions (important for hosted servers)
+    os.chmod(custom_temp_dir, 0o755)
+    
+    # Override Python's default temp directory
+    tempfile.tempdir = custom_temp_dir
+    
+    # Set environment variables (affects all subprocesses)
+    os.environ['TMPDIR'] = custom_temp_dir
+    os.environ['TEMP'] = custom_temp_dir
+    os.environ['TMP'] = custom_temp_dir
+    
+    print(f"[TEMP] Using custom temp directory: {custom_temp_dir}")
+    
+    # Test if temp directory is writable
+    try:
+        test_file = tempfile.NamedTemporaryFile(delete=True)
+        test_file.close()
+        print(f"[TEMP] ✅ Temp directory is writable")
+    except Exception as e:
+        print(f"[TEMP] ❌ Temp directory test failed: {e}")
+        raise e
+    
+    return custom_temp_dir
+
+# ✅ CRITICAL: Call this BEFORE importing Flask or other libraries
+custom_temp = setup_custom_temp_directory()
+
+
 import uuid
 import traceback
-import tempfile
 import numpy as np
 from flask import Flask, request, jsonify, send_from_directory
 from flask_cors import CORS
@@ -114,7 +153,8 @@ def generate_subtitles_with_whisper_trimmed(video_path, language="auto", transla
                 logger=None,
                 audio_codec='aac',
                 temp_audiofile=temp_audio_file,  # ✅ Specify temp audio location
-                remove_temp=True
+                remove_temp=True,
+                ffmpeg_params=['-movflags', 'faststart']
             )
 
             if os.path.exists(temp_video_path):
@@ -160,20 +200,7 @@ def generate_subtitles_with_whisper_trimmed(video_path, language="auto", transla
         
         # Define task
         task = 'translate' if translate_to_english else 'transcribe'
-        
-        # Transcribe trimmed audio (timing starts from 0)
-        # result = model.transcribe(
-        #     audio_path, 
-        #     task=task,
-        #     language=None if language == "auto" else language,
-        #     verbose=False,
-        #     word_timestamps=True,
-        #     temperature=0,
-        #     no_speech_threshold=0.3,
-        #     logprob_threshold=-0.8,
-        #     condition_on_previous_text=False,
-        # )
-        # ✅ Enhanced transcription with better detection
+      
         result = model.transcribe(
             audio_path, 
             task=task,
@@ -246,6 +273,19 @@ def generate_subtitles_with_whisper_trimmed(video_path, language="auto", transla
                 print("[WHISPER] Cleaned up temp audio file")
             except Exception as cleanup_error:
                 print(f"[WHISPER] Temp audio cleanup warning: {cleanup_error}")
+
+        if audio_path:
+          print(f"[TEMP DEBUG] Checking extracted audio file: {audio_path}")
+          if os.path.exists(audio_path):
+              try:
+                  file_size = os.path.getsize(audio_path)
+                  print(f"[TEMP DEBUG] File exists, size: {file_size / 1024:.2f} KB")
+                  os.unlink(audio_path)
+                  print("[TEMP DEBUG] ✅ Extracted audio file deleted successfully")
+              except Exception as cleanup_error:
+                  print(f"[TEMP DEBUG] ❌ Failed to delete audio: {cleanup_error}")
+          else:
+              print(f"[TEMP DEBUG] ⚠️ Audio file already gone: {audio_path}")
 
 def split_long_subtitle(text, start_time, end_time, max_chars, max_words):
     """
@@ -942,7 +982,8 @@ def process_video_file(input_path, output_path, params, audio_path=None):
                 verbose=False,
                 logger=None,
                 threads=4,  # Use multiple threads for faster processing
-                preset='medium'  # Good balance of speed vs quality
+                preset='medium',  # Good balance of speed vs quality
+                ffmpeg_params=['-movflags', 'faststart']
             )
             
             print("[SUCCESS] Processing complete.")
@@ -1175,9 +1216,44 @@ def health_check():
 def ping():
     return "pong", 200
 
-@app.errorhandler(500)
-def handle_500(e):
-    return jsonify({"error": "Internal server error", "status": "error"}), 500
+@app.route('/test-temp', methods=['GET'])
+def test_temp_directory():
+    """Test endpoint to verify temp directory setup"""
+    try:
+        temp_dir = tempfile.gettempdir()
+        
+        # Create a test file
+        test_file = tempfile.NamedTemporaryFile(delete=False, suffix='.txt')
+        test_file.write(b'Test temp file content')
+        test_file.close()
+        
+        # Check file exists
+        file_exists = os.path.exists(test_file.name)
+        file_size = os.path.getsize(test_file.name) if file_exists else 0
+        
+        # Clean up test file
+        if file_exists:
+            os.unlink(test_file.name)
+        
+        return jsonify({
+            "success": True,
+            "temp_directory": temp_dir,
+            "server_directory": os.path.dirname(os.path.abspath(__file__)),
+            "test_file_created": file_exists,
+            "test_file_size": file_size,
+            "disk_usage": {
+                "total": shutil.disk_usage(temp_dir).total // (1024**3),
+                "free": shutil.disk_usage(temp_dir).free // (1024**3)
+            }
+        })
+        
+    except Exception as e:
+        return jsonify({
+            "success": False,
+            "error": str(e),
+            "temp_directory": tempfile.gettempdir()
+        }), 500
+
 
 if __name__ == '__main__':
     # Railway-specific configuration
@@ -1186,8 +1262,8 @@ if __name__ == '__main__':
     print("[SERVER] Production mode - Railway deployment")
     
     # Don't pre-load heavy models on Railway
-    # app.run(host='0.0.0.0', port=port, debug=False, threaded=True)
-    app.run(host='0.0.0.0', port=5000, debug=True)
+    app.run(host='0.0.0.0', port=port, debug=False, threaded=True)
+
 
 else:
     # Production server (Render will use this)
