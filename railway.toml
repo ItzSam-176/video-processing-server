@@ -1,0 +1,9 @@
+[build]
+builder = "DOCKERFILE"
+dockerfile = "Dockerfile"
+
+[deploy]
+startCommand = "python server.py"
+healthcheckPath = "/health"
+healthcheckTimeout = 300
+restartPolicyType = "ON_FAILURE"
