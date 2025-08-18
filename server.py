@@ -2,6 +2,16 @@ import os
 import tempfile
 import shutil
 
+# Force Python and MoviePy to use project tmp dir
+PROJECT_TMP = "/var/www/pythonapp/tmp"
+os.makedirs(PROJECT_TMP, exist_ok=True)
+
+# Update environment and tempfile defaults
+os.environ["TMPDIR"] = PROJECT_TMP
+os.environ['TEMP'] = PROJECT_TMP
+os.environ['TMP'] = PROJECT_TMP
+tempfile.tempdir = PROJECT_TMP
+
 def setup_custom_temp_directory():
     """Set temp directory with proper permissions and fallback"""
     
@@ -67,7 +77,7 @@ def setup_custom_temp_directory():
     return custom_temp_dir
 
 # ✅ CRITICAL: Call this BEFORE importing Flask or other libraries
-custom_temp = setup_custom_temp_directory()
+# custom_temp = setup_custom_temp_directory()
 
 
 import uuid
