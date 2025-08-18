@@ -3,17 +3,47 @@ import tempfile
 import shutil
 
 def setup_custom_temp_directory():
-    """Set temp directory to server.py location instead of system root"""
+    """Set temp directory with proper permissions and fallback"""
     
-    # Get the directory where server.py is located
-    server_dir = os.path.dirname(os.path.abspath(__file__))
-    custom_temp_dir = os.path.join(server_dir, 'tmp')
+    # Try your preferred path first
+    preferred_paths = [
+        '/var/www/pythonapp/tmp',
+        '/tmp/pythonapp',
+        os.path.join(os.path.dirname(os.path.abspath(__file__)), 'tmp')
+    ]
     
-    # Create the temp directory if it doesn't exist
-    os.makedirs(custom_temp_dir, exist_ok=True)
+    custom_temp_dir = None
     
-    # Set permissions (important for hosted servers)
-    os.chmod(custom_temp_dir, 0o755)
+    for path in preferred_paths:
+        try:
+            # Create the temp directory if it doesn't exist
+            os.makedirs(path, exist_ok=True)
+            
+            # Test write permissions
+            test_file = os.path.join(path, 'write_test.tmp')
+            with open(test_file, 'w') as f:
+                f.write('test')
+            os.unlink(test_file)
+            
+            # If we get here, the path works
+            custom_temp_dir = path
+            print(f"[TEMP] Successfully using: {custom_temp_dir}")
+            break
+            
+        except (OSError, PermissionError) as e:
+            print(f"[TEMP] Failed to use {path}: {e}")
+            continue
+    
+    # Fallback to system temp if nothing works
+    if custom_temp_dir is None:
+        custom_temp_dir = tempfile.gettempdir()
+        print(f"[TEMP] Falling back to system temp: {custom_temp_dir}")
+    
+    # Set permissions (with error handling)
+    try:
+        os.chmod(custom_temp_dir, 0o755)
+    except (OSError, PermissionError) as e:
+        print(f"[TEMP] Warning: Could not set permissions on {custom_temp_dir}: {e}")
     
     # Override Python's default temp directory
     tempfile.tempdir = custom_temp_dir
@@ -23,7 +53,7 @@ def setup_custom_temp_directory():
     os.environ['TEMP'] = custom_temp_dir
     os.environ['TMP'] = custom_temp_dir
     
-    print(f"[TEMP] Using custom temp directory: {custom_temp_dir}")
+    print(f"[TEMP] Using temp directory: {custom_temp_dir}")
     
     # Test if temp directory is writable
     try:
@@ -590,7 +620,7 @@ def handle_video_upload():
 
         # Create temp video file
         video_file = request.files['video']
-        temp_video = tempfile.NamedTemporaryFile(suffix='.mp4', delete=False)
+        temp_video = tempfile.NamedTemporaryFile(suffix='.mp4', delete=False, dir=tempfile.gettempdir())
         video_file.save(temp_video.name)
         temp_video.close()
         
