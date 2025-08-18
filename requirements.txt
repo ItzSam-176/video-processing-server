@@ -4,6 +4,7 @@ charset-normalizer==3.4.2
 click==8.2.1
 decorator==4.4.2
 emoji==1.7.0
+faster-whisper==1.2.0
 filelock==3.18.0
 Flask==2.3.3
 Flask-Cors==4.0.0

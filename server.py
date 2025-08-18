@@ -1,6 +1,7 @@
 import os
 import tempfile
 import shutil
+import sys
 
 # Force Python and MoviePy to use project tmp dir
 PROJECT_TMP = "/var/www/pythonapp/tmp"
@@ -99,6 +100,14 @@ import gc
 import colorsys
 from scipy import ndimage
 
+#Subtitles
+# import whisper
+from faster_whisper import WhisperModel
+
+from moviepy.video.tools.subtitles import SubtitlesClip
+WHISPER_MODEL = None
+
+
 
 app = Flask(__name__)
 CORS(app)
@@ -172,6 +181,447 @@ def validate_video_file(file_path):
     except Exception as e:
         # Convert other exceptions to ValueError for consistent handling
         raise ValueError(f"Video validation error: {str(e)}")
+
+#Subtitle
+#Subtitles
+def get_whisper_model():
+    """Get or create global WhisperModel instance"""
+    global WHISPER_MODEL
+    
+    if WHISPER_MODEL is None:
+        print("[WHISPER] Loading model...")
+        try:
+            model_size = os.getenv('WHISPER_MODEL_SIZE', 'small')
+            device = "cpu"  # Use CPU for production stability
+            compute_type = "int8"  # Memory efficient
+            
+            WHISPER_MODEL = WhisperModel(
+                model_size, 
+                device=device, 
+                compute_type=compute_type,
+                num_workers=1  # Single worker for stability
+            )
+            print(f"[WHISPER] Model loaded: {model_size}")
+        except Exception as e:
+            print(f"[WHISPER] Model loading failed: {e}")
+            # Fallback to tiny model
+            WHISPER_MODEL = WhisperModel("tiny", device="cpu", compute_type="int8")
+            print("[WHISPER] Using fallback tiny model")
+    
+    return WHISPER_MODEL
+
+def generate_subtitles_with_whisper_trimmed(video_path, language="auto", translate_to_english=False, trim_start=0, trim_end=None):
+    """
+    Generate auto-subtitles for TRIMMED video portion with proper timing synchronization
+    """
+    temp_video_path = None
+    temp_audio_file = None
+    audio_path = None
+    try:
+        print(f"[WHISPER] Starting subtitle generation for trimmed portion: {trim_start}s to {trim_end}s")
+        
+        # ✅ STEP 1: Create trimmed video first
+        original_clip = VideoFileClip(video_path)
+        
+        # ✅ FIX: Handle end_time properly - don't override with arbitrary value
+        if trim_end is None:
+            trim_end = original_clip.duration
+        
+        # ✅ CRITICAL FIX: Use the actual trim_end value, don't recalculate
+        print(f"[WHISPER] Original video duration: {original_clip.duration}s")
+        print(f"[WHISPER] Using trim range: {trim_start}s to {trim_end}s")
+        print(f"[WHISPER] Expected trimmed duration: {trim_end - trim_start}s")
+        
+        # Create trimmed clip with correct end time
+        trimmed_clip = original_clip.subclip(trim_start, trim_end)
+
+        temp_dir = tempfile.gettempdir()
+        print(f"[GENERATE SUBTITLE TEMP DEBUG] System temp directory: {temp_dir}")
+        print(f"[GENERATE SUBTITLE TEMP DEBUG] Temp directory exists: {os.path.exists(temp_dir)}")
+        print(f"[GENERATE SUBTITLE TEMP DEBUG] Temp directory writable: {os.access(temp_dir, os.W_OK)}")
+        print(f"[GENERATE SUBTITLE TEMP DEBUG] Current working directory: {os.getcwd()}")
+        unique_id = f"{os.getpid()}-{int(time.time())}"
+        temp_video_path = os.path.join(temp_dir, f"whisper-trimmed-{unique_id}.mp4")
+        temp_audio_file = os.path.join(temp_dir, f"whisper-temp-audio-{unique_id}.m4a")
+        print(f"[GENERATE SUBTITLE TEMP DEBUG] Generated unique ID: {unique_id}")
+        print(f"[GENERATE SUBTITLE TEMP DEBUG] Process ID: {os.getpid()}")
+        print(f"[GENERATE SUBTITLE TEMP DEBUG] Timestamp: {int(time.time())}")
+        print(f"[GENERATE SUBTITLE TEMP DEBUG] Temp video path: {temp_video_path}")
+        print(f"[GENERATE SUBTITLE TEMP DEBUG] Temp audio path: {temp_audio_file}")
+        print(f"[GENERATE SUBTITLE TEMP DEBUG] Temp video parent dir exists: {os.path.exists(os.path.dirname(temp_video_path))}")
+        print(f"[GENERATE SUBTITLE TEMP DEBUG] Temp audio parent dir exists: {os.path.exists(os.path.dirname(temp_audio_file))}")
+        
+        original_cwd = os.getcwd()
+        print(f"[TEMP DEBUG] Original working directory: {original_cwd}")
+        # Save trimmed video to temp file
+        try:
+            os.chdir(temp_dir)  # Force MoviePy to use temp directory
+            print(f"[WHISPER] Changed working directory to: {temp_dir}")
+            print(f"[GENERATE SUBTITLE TEMP DEBUG] Changed working directory to: {temp_dir}")
+            print(f"[GENERATE SUBTITLE TEMP DEBUG] Current working directory after change: {os.getcwd()}")
+
+            print(f"[GENERATE SUBTITLE TEMP DEBUG] About to create trimmed video file...")
+            print(f"[GENERATE SUBTITLE TEMP DEBUG] MoviePy will create temp files in: {os.getcwd()}")
+            
+            trimmed_clip.write_videofile(
+                temp_video_path,
+                verbose=False,
+                logger=None,
+                audio_codec='aac',
+                temp_audiofile=temp_audio_file,  # ✅ Specify temp audio location
+                remove_temp=True,
+                ffmpeg_params=['-movflags', 'faststart']
+            )
+
+            if os.path.exists(temp_video_path):
+                file_size = os.path.getsize(temp_video_path)
+                print(f"[GENERATE SUBTITLE TEMP DEBUG] ✅ Trimmed video created successfully")
+                print(f"[GENERATE SUBTITLE TEMP DEBUG] File size: {file_size / 1024 / 1024:.2f} MB")
+                print(f"[GENERATE SUBTITLE TEMP DEBUG] File permissions: {oct(os.stat(temp_video_path).st_mode)[-3:]}")
+            else:
+                print(f"[GENERATE SUBTITLE TEMP DEBUG] ❌ Trimmed video file NOT created!")
+                
+            if os.path.exists(temp_audio_file):
+                audio_size = os.path.getsize(temp_audio_file)
+                print(f"[GENERATE SUBTITLE TEMP DEBUG] ✅ Temp audio file created: {audio_size / 1024:.2f} KB")
+            else:
+                print(f"[GENERATE SUBTITLE TEMP DEBUG] ⚠️ Temp audio file not found (may be auto-removed)")
+                
+        except Exception as video_create_error:
+            print(f"[GENERATE SUBTITLE TEMP DEBUG] ❌ Error creating trimmed video: {video_create_error}")
+            print(f"[GENERATE SUBTITLE TEMP DEBUG] Error type: {type(video_create_error).__name__}")
+            raise video_create_error
+            
+        finally:
+            os.chdir(original_cwd)  # Always restore working directory
+            print(f"[GENERATE SUBTITLE TEMP DEBUG] Restored working directory to: {original_cwd}")
+            print(f"[GENERATE SUBTITLE TEMP DEBUG] Current working directory after restore: {os.getcwd()}")
+            print(f"[WHISPER] Restored working directory to: {original_cwd}")
+        
+        
+        # Clean up clips
+        trimmed_clip.close()
+        original_clip.close()
+        
+        print(f"[WHISPER] Created trimmed video: {temp_video_path}")
+        print(f"[WHISPER] Trimmed duration: {trim_end - trim_start}s")
+        
+        # ✅ STEP 2: Generate subtitles from trimmed video (timing will be 0-based)
+        # model = load_whisper_model("small")
+        # In your function, replace the model creation with:
+        WHISPER_MODEL = get_whisper_model()
+
+        
+        # Extract audio from trimmed video
+        print(f"[GENERATE SUBTITLE TEMP DEBUG] About to extract audio from: {temp_video_path}")
+        audio_path = extract_audio_for_whisper(temp_video_path)
+        print(f"[GENERATE SUBTITLE TEMP DEBUG] Audio extracted to: {audio_path}")
+        
+        # Define task
+        task = 'translate' if translate_to_english else 'transcribe'
+
+        segments, info = WHISPER_MODEL.transcribe(
+            audio_path, 
+            task=task,
+            language=None if language == "auto" else language,
+            beam_size=5,  # Use beam_size instead of verbose
+            word_timestamps=True,  # This might work, but check documentation
+            temperature=0.0,
+            vad_filter=True,  # Instead of no_speech_threshold
+            vad_parameters=dict(min_silence_duration_ms=500),
+            condition_on_previous_text=False
+        )
+
+
+        
+        print(f"[WHISPER] Detected language: {getattr(info, 'language', 'unknown')}")
+    
+
+        # ✅ STEP 3: Process subtitles using segments generator
+        subtitles = []
+        segment_count = 0
+        MAX_CHARS_PER_SUBTITLE = 50
+        MAX_WORDS_PER_SUBTITLE = 8
+
+        for i, segment in enumerate(segments):
+            start_time = segment.start  # float
+            end_time = segment.end      # float
+            text = segment.text.strip()
+            
+            print(f"[WHISPER] Segment {i}: {start_time:.2f}s-{end_time:.2f}s: '{text}'")
+            
+            if not text:
+                continue
+
+            if len(text) > MAX_CHARS_PER_SUBTITLE or len(text.split()) > MAX_WORDS_PER_SUBTITLE:
+                split_subtitles = split_long_subtitle(text, start_time, end_time, MAX_CHARS_PER_SUBTITLE, MAX_WORDS_PER_SUBTITLE)
+                subtitles.extend(split_subtitles)
+                print(f"[WHISPER] Split long text: '{text[:30]}...' into {len(split_subtitles)} parts")
+            else:
+                subtitles.append(((start_time, end_time), text))
+            
+            segment_count += 1
+
+        
+        print(f"[WHISPER] Generated {len(subtitles)} subtitle segments for trimmed video (0-based timing)")
+    
+        return {
+            'subtitles': subtitles,
+            'language': getattr(info, 'language', 'unknown'),
+            'segments_count': len(subtitles),
+            'trim_start': trim_start,
+            'trim_end': trim_end,
+            'trimmed_duration': trim_end - trim_start
+        }
+
+        
+    except Exception as e:
+        print(f"[WHISPER] Trimmed subtitle generation failed: {e}")
+        print(f"[GENERATE SUBTITLE TEMP DEBUG] ❌ Exception details: {type(e).__name__}: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        raise e
+    finally:
+        # Enhanced cleanup
+        if temp_video_path and os.path.exists(temp_video_path):
+            try:
+                os.unlink(temp_video_path)
+                print("[WHISPER] Cleaned up trimmed video file")
+            except Exception as cleanup_error:
+                print(f"[WHISPER] Trimmed video cleanup warning: {cleanup_error}")
+        
+        if temp_audio_file and os.path.exists(temp_audio_file):
+            try:
+                os.unlink(temp_audio_file)
+                print("[WHISPER] Cleaned up temp audio file")
+            except Exception as cleanup_error:
+                print(f"[WHISPER] Temp audio cleanup warning: {cleanup_error}")
+
+        if audio_path:
+          print(f"[TEMP DEBUG] Checking extracted audio file: {audio_path}")
+          if os.path.exists(audio_path):
+              try:
+                  file_size = os.path.getsize(audio_path)
+                  print(f"[TEMP DEBUG] File exists, size: {file_size / 1024:.2f} KB")
+                  os.unlink(audio_path)
+                  print("[TEMP DEBUG] ✅ Extracted audio file deleted successfully")
+              except Exception as cleanup_error:
+                  print(f"[TEMP DEBUG] ❌ Failed to delete audio: {cleanup_error}")
+          else:
+              print(f"[TEMP DEBUG] ⚠️ Audio file already gone: {audio_path}")
+
+def split_long_subtitle(text, start_time, end_time, max_chars, max_words):
+    """
+    Split long subtitle text into shorter segments with proper timing
+    """
+    words = text.split()
+    segments = []
+    current_segment = []
+    duration = end_time - start_time
+    
+    for word in words:
+        # Check if adding this word exceeds limits
+        test_segment = current_segment + [word]
+        test_text = ' '.join(test_segment)
+        
+        if len(test_text) > max_chars or len(test_segment) > max_words:
+            if current_segment:  # Save current segment
+                segment_text = ' '.join(current_segment)
+                segment_duration = duration * len(current_segment) / len(words)
+                segment_start = start_time + duration * len(segments) * max_words / len(words)
+                segment_end = min(segment_start + segment_duration, end_time)
+                
+                segments.append(((segment_start, segment_end), segment_text))
+                current_segment = [word]  # Start new segment
+            else:
+                # Single word is too long, truncate it
+                truncated_word = word[:max_chars-3] + "..."
+                segments.append(((start_time, end_time), truncated_word))
+                current_segment = []
+        else:
+            current_segment.append(word)
+    
+    # Add remaining words
+    if current_segment:
+        segment_text = ' '.join(current_segment)
+        segment_start = start_time + duration * len(segments) * max_words / len(words)
+        segments.append(((segment_start, end_time), segment_text))
+    
+    return segments
+
+def extract_audio_for_whisper(video_path):
+    """Extract and enhance audio from video for better Whisper performance"""
+    video = None
+    try:
+        print(f"[WHISPER] Starting audio extraction from: {video_path}")
+        
+        # File validation (keeping your existing code)
+        if not os.path.exists(video_path):
+            raise FileNotFoundError(f"Video file not found: {video_path}")
+        
+        file_size = os.path.getsize(video_path)
+        if file_size == 0:
+            raise ValueError(f"Video file is empty: {video_path} (0 bytes)")
+        
+        print(f"[WHISPER] Video file validated - Size: {file_size / (1024*1024):.2f} MB")
+        
+        try:
+            video = VideoFileClip(video_path)
+        except Exception as moviepy_error:
+            raise ValueError(f"MoviePy failed to load video: {moviepy_error}")
+        
+        if video is None:
+            raise ValueError("MoviePy returned None - video file may be corrupted")
+        
+        if not hasattr(video, 'duration') or video.duration <= 0:
+            raise ValueError(f"Invalid video duration: {getattr(video, 'duration', 'None')}")
+        
+        if video.audio is None:
+            video.close()
+            raise ValueError("Video file has no audio track - cannot generate subtitles")
+        
+        print(f"[WHISPER] Video validated - Duration: {video.duration:.2f}s, Size: {video.size}")
+        
+        # ✅ FIXED: Use consistent temp directory approach (same as your working functions)
+        temp_dir = tempfile.gettempdir()
+        print(f"[EXTRACT AUDIO TEMP DEBUG] Using temp directory: {temp_dir}")
+        os.makedirs(temp_dir, exist_ok=True)
+        
+        unique_id = f"{os.getpid()}-{int(time.time())}"
+        audio_path = os.path.join(temp_dir, f"whisper-audio-{unique_id}.wav")
+
+        print(f"[EXTRACT AUDIO TEMP DEBUG] Generated audio path: {audio_path}")
+        print(f"[EXTRACT AUDIO TEMP DEBUG] Audio parent directory: {os.path.dirname(audio_path)}")
+        print(f"[EXTRACT AUDIO TEMP DEBUG] Audio parent dir exists: {os.path.exists(os.path.dirname(audio_path))}")
+        print(f"[WHISPER] Extracting audio to: {audio_path}")
+
+        print(f"[WHISPER] Extracting audio to: {audio_path}")
+        
+        # ✅ AGGRESSIVE FIX: Change working directory to force MoviePy compliance
+        original_cwd = os.getcwd()
+        print(f"[EXTRACT AUDIO TEMP DEBUG] Original CWD: {original_cwd}")
+        try:
+            os.chdir(temp_dir)  # Force MoviePy to use temp directory
+            print(f"[EXTRACT AUDIO TEMP DEBUG] Changed CWD to: {temp_dir}")
+            print(f"[EXTRACT AUDIO TEMP DEBUG] Current CWD: {os.getcwd()}")
+            print(f"[WHISPER] Changed working directory to: {temp_dir}")
+            
+            # ✅ Log before audio extraction
+            print(f"[EXTRACT AUDIO TEMP DEBUG] About to extract audio...")
+            print(f"[EXTRACT AUDIO TEMP DEBUG] MoviePy will create temp files in: {os.getcwd()}")
+            
+            video.audio.write_audiofile(
+                audio_path, 
+                verbose=False, 
+                logger=None,
+                codec='pcm_s16le',
+            )
+            if os.path.exists(audio_path):
+                audio_size = os.path.getsize(audio_path)
+                print(f"[EXTRACT AUDIO TEMP DEBUG] ✅ Audio file created successfully")
+                print(f"[EXTRACT AUDIO TEMP DEBUG] Audio file size: {audio_size / 1024:.2f} KB")
+                print(f"[EXTRACT AUDIO TEMP DEBUG] Audio file permissions: {oct(os.stat(audio_path).st_mode)[-3:]}")
+            else:
+                print(f"[EXTRACT AUDIO TEMP DEBUG] ❌ Audio file NOT created!")
+        except Exception as audio_error:
+            print(f"[EXTRACT AUDIO TEMP DEBUG] ❌ Audio extraction error: {audio_error}")
+            print(f"[EXTRACT AUDIO TEMP DEBUG] Error type: {type(audio_error).__name__}")
+            raise audio_error
+        finally:
+            os.chdir(original_cwd)  # Always restore working directory
+            print(f"[EXTRACT AUDIO TEMP DEBUG] Restored CWD to: {original_cwd}")
+            print(f"[WHISPER] Restored working directory to: {original_cwd}")
+        
+        # Rest of your function remains the same...
+        enhanced_audio_path = enhance_audio_for_speech(audio_path)
+        
+        if enhanced_audio_path != audio_path:
+            try:
+                os.unlink(audio_path)
+            except:
+                pass
+            audio_path = enhanced_audio_path
+        
+        if not os.path.exists(audio_path) or os.path.getsize(audio_path) == 0:
+            raise ValueError("Audio extraction failed - output file is empty")
+        
+        print(f"[WHISPER] Audio extraction successful: {os.path.getsize(audio_path)} bytes")
+        
+        video.close()
+        return audio_path
+        
+    except Exception as e:
+        print(f"[WHISPER] Audio extraction failed: {e}")
+        if video is not None:
+            try:
+                video.close()
+            except:
+                pass
+        raise e
+
+def enhance_audio_for_speech(audio_path):
+    """Enhance audio to improve speech recognition in music"""
+    try:
+        import subprocess
+        
+        # ✅ FIXED: Use system temp directory
+        temp_dir = tempfile.gettempdir()
+        unique_id = f"{os.getpid()}-{int(time.time())}"
+        enhanced_path = os.path.join(temp_dir, f"enhanced-audio-{unique_id}.wav")
+        
+        # Use FFmpeg to enhance vocals and reduce background music
+        subprocess.run([
+            'ffmpeg', '-i', audio_path,
+            '-af', 'highpass=f=200,lowpass=f=3000,volume=1.5',  # Filter for vocal range
+            '-ac', '1',  # Convert to mono
+            '-ar', '16000',  # Whisper's preferred sample rate
+            '-y',
+            enhanced_path
+        ], check=True, capture_output=True)
+        
+        print("[WHISPER] Audio enhanced for better speech recognition")
+        return enhanced_path
+        
+    except Exception as e:
+        print(f"[WHISPER] Audio enhancement failed: {e}, using original")
+        return audio_path
+
+
+def create_subtitle_clip(subtitles, video_width, video_height, font_size=None, font_color='white', bg_color='black'):
+    """
+    Create MoviePy subtitle clip using your existing text rendering system
+    """
+    print(f"[DEBUG] Creating subtitle clip with {len(subtitles)} segments")
+    for i, subtitle in enumerate(subtitles):
+        print(f"[DEBUG] Subtitle {i}: {subtitle[0]} -> '{subtitle[1]}'")
+    
+    if not font_size:
+        # Use your existing aspect-ratio aware sizing
+        font_size = get_aspect_ratio_aware_font_size(48, video_width, video_height)
+    
+    def make_textclip(txt):
+        """Generate individual subtitle text clip"""
+        print(f"[DEBUG] Creating text clip for: '{txt}'")
+        
+        # Use your existing text creation function
+        text_array = create_text_with_emoji_pilmoji_fixed_macos(
+            text=txt,
+            font_size=font_size,
+            color=font_color,
+            bg_color=bg_color,
+            size=(video_width, int(video_height * 0.2)),  # Subtitle area
+            text_position=None  # Center text
+        )
+        
+        return ImageClip(text_array, transparent=True)
+    
+    # Create subtitle clip
+    subtitle_clip = SubtitlesClip(subtitles, make_textclip)
+    
+    # Position at bottom of video
+    return subtitle_clip.set_position(('center', video_height - int(video_height * 0.15)))
+
+
 
 def get_aspect_ratio_aware_font_size(user_size, video_width, video_height, method='proportional'):
     """
@@ -594,6 +1044,47 @@ def process_video_file(input_path, output_path, params, audio_path=None):
         else:
             video = clip
 
+        
+        # Handle subtitle overlay (your existing code)
+        if params.get('enable_subtitles') == 'true':
+            print("[PROCESSING] Adding auto-generated subtitles...")
+            
+            subtitle_font_size = int(float(params.get('subtitle_font_size', 32)))
+            subtitle_color = params.get('subtitle_color', 'white')
+            subtitle_bg_color = params.get('subtitle_bg_color', 'black')
+            
+            print(f"[PROCESSING] Using trim parameters for subtitles: {start_time}s to {end_time}s")
+            print(f"[PROCESSING] Subtitle generation duration: {end_time - start_time}s")
+            
+            subtitle_language = params.get('subtitle_language', 'auto')
+            translate_to_english = params.get('translate_to_english', 'false').lower() == 'true'
+            
+            subtitle_result = generate_subtitles_with_whisper_trimmed(
+                input_path,
+                language=subtitle_language,
+                translate_to_english=translate_to_english,
+                trim_start=start_time,
+                trim_end=end_time
+            )
+            
+            print(f"[DEBUG] Generated trimmed subtitles: {subtitle_result}")
+            
+            subtitle_clip = create_subtitle_clip(
+                subtitle_result['subtitles'],
+                video_w, video_h,
+                font_size=subtitle_font_size,
+                font_color=subtitle_color,
+                bg_color=subtitle_bg_color
+            )
+            
+            if isinstance(video, CompositeVideoClip):
+                video = CompositeVideoClip([video, subtitle_clip.set_duration(video.duration)])
+            else:
+                video = CompositeVideoClip([video, subtitle_clip.set_duration(video.duration)])
+            
+            print(f"[PROCESSING] Added {len(subtitle_result['subtitles'])} subtitle segments for trimmed video")
+
+
         # Preserve original audio if no replacement audio
         if not video.audio and clip.audio:
             video = video.set_audio(clip.audio)
@@ -747,7 +1238,8 @@ def handle_video_upload():
         processed_path = process_video_file(temp_video.name, output_path, request.form, audio_path)
         
         # Return network-accessible URL
-        video_url = f"http://{request.host}/python-app/processed/{output_filename}"
+        # video_url = f"http://{request.host}/python-app/processed/{output_filename}"
+        video_url = f"http://{request.host}/processed-videos/{output_filename}"
         print(f"[UPLOAD] Returning video URL: {video_url}")
 
         return jsonify({
@@ -784,6 +1276,77 @@ def handle_video_upload():
             except Exception as e:
                 print(f"[CLEANUP] Failed to delete temp audio file: {e}")
 
+@app.route('/generate-subtitles', methods=['POST'])
+def generate_subtitles():
+    """Generate auto-subtitles for uploaded video with trim support"""
+    temp_video = None
+    
+    try:
+        if 'video' not in request.files:
+            return jsonify({"error": "No video file provided"}), 400
+        
+        # Save uploaded video to temp file
+        video_file = request.files['video']
+        temp_video = tempfile.NamedTemporaryFile(suffix='.mp4', delete=False)
+        video_file.save(temp_video.name)
+        temp_video.close()
+        
+        # Get parameters
+        language = request.form.get('language', 'auto')
+        translate_to_english = request.form.get('translate_to_english', 'false').lower() == 'true'
+        
+        # ✅ Get trim parameters
+        trim_start = float(request.form.get('trim_start', 0))
+        trim_end = request.form.get('trim_end')
+        trim_end = float(trim_end) if trim_end else None
+        
+        print(f"[SUBTITLES] Generating subtitles for trimmed video: {trim_start}s to {trim_end}s")
+        print(f"[SUBTITLES] Language: {language}, Translate: {translate_to_english}")
+        
+        # ✅ Use trimmed subtitle generation
+        result = generate_subtitles_with_whisper_trimmed(
+            temp_video.name, 
+            language=language,
+            translate_to_english=translate_to_english,
+            trim_start=trim_start,
+            trim_end=trim_end
+        )
+        
+        return jsonify({
+            "success": True,
+            "subtitles": [
+                {
+                    "start": sub[0][0],
+                    "end": sub[0][1], 
+                    "text": sub[1]
+                } for sub in result['subtitles']
+            ],
+            "detected_language": result['language'],
+            "segments_count": result['segments_count'],
+            "trim_info": {
+                "trim_start": result['trim_start'],
+                "trim_end": result['trim_end'],
+                "trimmed_duration": result['trimmed_duration']
+            },
+            "message": f"Generated {result['segments_count']} subtitle segments for trimmed portion"
+        })
+        
+    except Exception as e:
+        print(f"[ERROR] Subtitle generation failed: {e}")
+        return jsonify({
+            "error": str(e),
+            "success": False,
+            "message": "Subtitle generation failed"
+        }), 500
+    
+    finally:
+        # Cleanup
+        if temp_video and os.path.exists(temp_video.name):
+            try:
+                os.unlink(temp_video.name)
+                print("[CLEANUP] Deleted temp video file")
+            except Exception as e:
+                print(f"[CLEANUP] Temp file cleanup failed: {e}")
 
 # Add this to fix Railway health checks
 @app.route('/')
@@ -848,7 +1411,7 @@ if __name__ == '__main__':
     print("[SERVER] Production mode - Railway deployment")
     
     # Don't pre-load heavy models on Railway
-    app.run(host='0.0.0.0', port=port, debug=False, threaded=True)
+    app.run(host='0.0.0.0', port=port, debug=True, threaded=True)
 
 
 else:
