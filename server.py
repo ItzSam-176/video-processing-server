@@ -96,6 +96,73 @@ CORS(app)
 PROCESSED_FOLDER = 'processed'
 os.makedirs(PROCESSED_FOLDER, exist_ok=True)
 
+import subprocess
+
+def validate_video_file(file_path):
+    """Validate video file integrity using both file checks and ffprobe"""
+    try:
+        # Check file size
+        file_size = os.path.getsize(file_path)
+        if file_size == 0:
+            raise ValueError("Empty file uploaded")
+        
+        if file_size < 1024:  # Less than 1KB is suspicious
+            raise ValueError("File too small to be a valid video")
+        
+        print(f"[VALIDATION] File size check passed: {file_size} bytes")
+        
+        # Try ffprobe first (faster and more reliable than MoviePy)
+        try:
+            result = subprocess.run([
+                'ffprobe', 
+                '-v', 'error',
+                '-select_streams', 'v:0',
+                '-show_entries', 'stream=duration',
+                '-of', 'csv=p=0',
+                file_path
+            ], capture_output=True, text=True, timeout=10)
+            
+            if result.returncode != 0:
+                raise ValueError("ffprobe validation failed - invalid video format")
+                
+            duration_str = result.stdout.strip()
+            if duration_str and float(duration_str) > 0:
+                print(f"[VALIDATION] ffprobe validation passed - duration: {duration_str}s")
+            else:
+                raise ValueError("Video has invalid duration")
+                
+        except subprocess.TimeoutExpired:
+            raise ValueError("Video validation timeout - file may be corrupted")
+        except subprocess.CalledProcessError:
+            raise ValueError("Video format validation failed")
+        except FileNotFoundError:
+            print("[VALIDATION] ffprobe not found, falling back to MoviePy validation")
+            # Fallback to MoviePy validation
+            pass
+        
+        # Additional MoviePy validation as fallback
+        try:
+            with VideoFileClip(file_path) as clip:
+                duration = clip.duration
+                if duration <= 0:
+                    raise ValueError("Invalid video duration from MoviePy")
+                width, height = clip.size
+                if width <= 0 or height <= 0:
+                    raise ValueError("Invalid video dimensions")
+                print(f"[VALIDATION] MoviePy validation passed - {width}x{height}, {duration}s")
+        except Exception as moviepy_error:
+            raise ValueError(f"MoviePy validation failed: {str(moviepy_error)}")
+        
+        print("[VALIDATION] ✅ Video file validation completed successfully")
+        return True
+        
+    except ValueError:
+        # Re-raise ValueError as-is
+        raise
+    except Exception as e:
+        # Convert other exceptions to ValueError for consistent handling
+        raise ValueError(f"Video validation error: {str(e)}")
+
 def get_aspect_ratio_aware_font_size(user_size, video_width, video_height, method='proportional'):
     """
     FIXED: Dynamic font scaling that respects user input while providing aspect-ratio awareness
@@ -620,11 +687,33 @@ def handle_video_upload():
 
         # Create temp video file
         video_file = request.files['video']
+        if video_file.filename == '':
+            return jsonify({"error": "Empty filename"}), 400
+            
         temp_video = tempfile.NamedTemporaryFile(suffix='.mp4', delete=False, dir=tempfile.gettempdir())
         video_file.save(temp_video.name)
         temp_video.close()
         
         print(f"[UPLOAD] Video saved to temp file: {temp_video.name}")
+
+        # ✅ ADD VALIDATION HERE - Check file integrity before processing
+        try:
+            file_size = os.path.getsize(temp_video.name)
+            if file_size == 0:
+                raise ValueError("Uploaded file is empty")
+            
+            print(f"[VALIDATION] File size: {file_size} bytes")
+            
+            # Validate the video file using your function
+            validate_video_file(temp_video.name)
+            print("[VALIDATION] ✅ Video file validation passed")
+            
+        except ValueError as validation_error:
+            print(f"[VALIDATION] ❌ Video validation failed: {validation_error}")
+            return jsonify({"error": f"Invalid video file: {str(validation_error)}"}), 400
+        except Exception as validation_error:
+            print(f"[VALIDATION] ❌ Unexpected validation error: {validation_error}")
+            return jsonify({"error": "Corrupted or invalid video file"}), 400
 
         # Handle optional audio file
         audio_path = None
@@ -644,14 +733,13 @@ def handle_video_upload():
         for key in request.form:
             print(f"  {key}: {request.form[key]}")
 
-        # Process the video
+        # Process the video (only after validation passes)
         processed_path = process_video_file(temp_video.name, output_path, request.form, audio_path)
         
         # Return network-accessible URL
         video_url = f"http://{request.host}/python-app/processed/{output_filename}"
         print(f"[UPLOAD] Returning video URL: {video_url}")
 
-        # Optimize memory usage after processing
         return jsonify({
             "processed_video_uri": video_url,
             "success": True,
@@ -685,6 +773,7 @@ def handle_video_upload():
                     print(f"[CLEANUP] Deleted temp audio file: {temp_audio.name}")
             except Exception as e:
                 print(f"[CLEANUP] Failed to delete temp audio file: {e}")
+
 
 # Add this to fix Railway health checks
 @app.route('/')
