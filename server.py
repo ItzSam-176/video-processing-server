@@ -1393,6 +1393,69 @@ def test_temp_directory():
             "temp_directory": tempfile.gettempdir()
         }), 500
 
+@app.route('/test-whisper-lite', methods=['GET'])
+def test_whisper_lite():
+    """
+    Very simple health endpoint for Faster Whisper.
+    - Verifies import
+    - Attempts to load a tiny model (fast, low RAM)
+    - Reports basic info and any available local models
+    """
+    info = {
+        "success": False,
+        "whisper_imported": False,
+        "model_load_success": False,
+        "model_size": "tiny",
+        "device": "cpu",
+        "compute_type": "int8",
+        "available_local_models": [],
+        "env": {
+            "WHISPER_MODEL_SIZE": os.getenv("WHISPER_MODEL_SIZE"),
+            "TMPDIR": os.getenv("TMPDIR"),
+            "TEMP": os.getenv("TEMP"),
+            "TMP": os.getenv("TMP"),
+        },
+        "temp_directory": tempfile.gettempdir()
+    }
+    try:
+        # 1) Import check
+        from faster_whisper import WhisperModel
+        info["whisper_imported"] = True
+
+        # 2) List common local model directories (if present)
+        candidates = [
+            os.path.expanduser("~/.cache/whisper"),
+            os.path.expanduser("~/.cache/faster_whisper"),
+            "/root/.cache/whisper",
+            "/root/.cache/faster_whisper",
+            "./models",
+        ]
+        seen = set()
+        for p in candidates:
+            if os.path.isdir(p):
+                for name in os.listdir(p):
+                    full = os.path.join(p, name)
+                    if os.path.isdir(full) and name not in seen:
+                        seen.add(name)
+        info["available_local_models"] = sorted(seen)
+
+        # 3) Try loading a tiny model on CPU with int8
+        try:
+            model = WhisperModel("tiny", device="cpu", compute_type="int8", num_workers=1)
+            # Touch a small attribute to ensure it’s usable
+            _ = model  # noqa: F841
+            info["model_load_success"] = True
+            info["success"] = True
+            return jsonify(info), 200
+        except Exception as e:
+            info["error"] = f"Model load failed: {type(e).__name__}: {str(e)}"
+            return jsonify(info), 500
+
+    except Exception as e:
+        info["error"] = f"Whisper import failed: {type(e).__name__}: {str(e)}"
+        return jsonify(info), 500
+
+
 
 if __name__ == '__main__':
     # Railway-specific configuration
