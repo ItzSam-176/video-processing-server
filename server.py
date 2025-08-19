@@ -1228,8 +1228,7 @@ def handle_video_upload():
         processed_path = process_video_file(temp_video.name, output_path, request.form, audio_path)
         
         # Return network-accessible URL
-        # video_url = f"http://{request.host}/python-app/processed/{output_filename}"
-        video_url = f"http://{request.host}/processed-videos/{output_filename}"
+        video_url = f"http://{request.host}/python-app/processed/{output_filename}"
         print(f"[UPLOAD] Returning video URL: {video_url}")
 
         return jsonify({
@@ -1464,7 +1463,7 @@ if __name__ == '__main__':
     print("[SERVER] Production mode - Railway deployment")
     
     # Don't pre-load heavy models on Railway
-    app.run(host='0.0.0.0', port=port, debug=True, threaded=True)
+    app.run(host='0.0.0.0', port=port, debug=False, threaded=True)
 
 
 else:
